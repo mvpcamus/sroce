@@ -198,6 +198,22 @@ struct obj_hdr {
   uint8_t dst[];
 } __attribute__((packed));
 
+/******************************************************************************/
+/* RDMA header */
+
+#define RDMA_READ 0x01
+#define RDMA_WRITE 0x02
+#define RDMA_REQUEST 0x10
+#define RDMA_RESPONSE 0x20
+struct rdma_hdr {
+  uint8_t type;
+  uint8_t status;
+  beui16_t flags;
+  beui32_t id;
+  beui32_t offset;
+  beui32_t length;
+} __attribute__((packed));
+STATIC_ASSERT(sizeof(struct rdma_hdr) == 16, rdma_hdr);
 
 /******************************************************************************/
 /* TCP packets */

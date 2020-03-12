@@ -124,6 +124,7 @@ STATIC_ASSERT(sizeof(struct flextcp_pl_ktx) == 64, ktx_size);
 
 #define FLEXTCP_PL_ARX_INVALID    0x0
 #define FLEXTCP_PL_ARX_CONNUPDATE 0x1
+#define FLEXTCP_PL_ARX_RDMAUPDATE 0x2
 
 #define FLEXTCP_PL_ARX_FLRXDONE  0x1
 
@@ -136,10 +137,18 @@ struct flextcp_pl_arx_connupdate {
   uint8_t flags;
 } __attribute__((packed));
 
+/** RDMA Fastpath -> Application connection bump */
+struct flextcp_pl_arx_rdmaconnupdate {
+  uint64_t opaque;
+  uint32_t wq_tail;
+  uint32_t cq_head;
+} __attribute__((packed));
+
 /** Application RX queue entry */
 struct flextcp_pl_arx {
   union {
     struct flextcp_pl_arx_connupdate connupdate;
+    struct flextcp_pl_arx_rdmaconnupdate rdmaupdate;
     uint8_t raw[31];
   } __attribute__((packed)) msg;
   volatile uint8_t type;
@@ -151,19 +160,30 @@ STATIC_ASSERT(sizeof(struct flextcp_pl_arx) == 32, arx_size);
 /* App TX queue */
 
 #define FLEXTCP_PL_ATX_CONNUPDATE 0x1
+#define FLEXTCP_PL_ATX_RDMAUPDATE 0x2
 
 #define FLEXTCP_PL_ATX_FLTXDONE  0x1
+
+struct flextcp_pl_atx_connupdate {
+  uint32_t rx_bump;
+  uint32_t tx_bump;
+  uint32_t flow_id;
+  uint16_t bump_seq;
+  uint8_t  flags;
+} __attribute__((packed));
+
+/** RDMA Application -> Fastpath connection bump */
+struct flextcp_pl_atx_rdmaconnupdate {
+  uint32_t flow_id;
+  uint32_t wq_head;
+  uint32_t cq_tail;
+} __attribute__((packed));
 
 /** Application TX queue entry */
 struct flextcp_pl_atx {
   union {
-    struct {
-      uint32_t rx_bump;
-      uint32_t tx_bump;
-      uint32_t flow_id;
-      uint16_t bump_seq;
-      uint8_t  flags;
-    } __attribute__((packed)) connupdate;
+    struct flextcp_pl_atx_connupdate connupdate;
+    struct flextcp_pl_atx_rdmaconnupdate rdmaupdate;
     uint8_t raw[15];
   } __attribute__((packed)) msg;
   volatile uint8_t type;
@@ -311,6 +331,42 @@ struct flextcp_pl_flowst {
   uint32_t rtt_est;
 
 // 128
+
+  /********************RDMA additions *********************/
+  /** Offset in buffer for new data */
+  uint32_t txb_head;
+  /** Offset to next segment in partially transmitted WQ entry */
+  uint32_t wqe_tx_seq;
+  /** Base address of Work/Completion queue buffer */
+  uint64_t wq_base;
+  /** Base address of Reponse queue buffer */
+  uint64_t rq_base;
+  /** Base address of Memory Region */
+  uint64_t mr_base;
+  /** Work/Completion queue size in bytes */
+  uint32_t wq_len;
+  /** Memory region size in bytes */
+  uint32_t mr_len;
+  /** Offset to which new WQE will be added */
+  uint32_t wq_head;
+  /** Offset of the next WQE to be processed */
+  uint32_t wq_tail;
+  /** Offset of the oldest ack'd WQE unprocessed by application */
+  uint32_t cq_head;
+  /** Offset of the latest ack'd WQE unprocessed by application */
+  uint32_t cq_tail;
+  /** Offset of the latest unack'd request */
+  uint32_t rq_head;
+  /** Offset of the oldest unack'd request */
+  uint32_t rq_tail;
+// 192
+  /** Buffer for partially received request */
+  uint8_t pending_rq_buf[16];
+  /** RQ parsing state */
+  uint32_t pending_rq_state;
+  /** Offset to next segment in partially transmitted RQ entry */
+  uint32_t rqe_tx_seq;
+// 216
 } __attribute__((packed, aligned(64)));
 
 #define FLEXNIC_PL_FLOWHTE_VALID  (1 << 31)

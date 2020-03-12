@@ -174,8 +174,12 @@ struct kernel_appin_conn_opened {
   uint64_t opaque;
   uint64_t rx_off;
   uint64_t tx_off;
+  uint64_t mr_off;  // rdma
+  uint64_t wq_off;  // rdma
   uint32_t rx_len;
   uint32_t tx_len;
+  uint32_t mr_len;  // rdma
+  uint32_t wq_len;  // rdma
   int32_t  status;
   uint32_t seq_rx;
   uint32_t seq_tx;
@@ -197,8 +201,12 @@ struct kernel_appin_accept_conn {
   uint64_t opaque;
   uint64_t rx_off;
   uint64_t tx_off;
+  uint64_t mr_off;  // rdma
+  uint64_t wq_off;  // rdma
   uint32_t rx_len;
   uint32_t tx_len;
+  uint32_t mr_len;  // rdma
+  uint32_t wq_len;  // rdma
   int32_t  status;
   uint32_t seq_rx;
   uint32_t seq_tx;
@@ -210,17 +218,18 @@ struct kernel_appin_accept_conn {
 } __attribute__((packed));
 
 /** Common struct for events on app -> kernel queue */
+#define RAW_BYTES 127 // original 63
 struct kernel_appin {
   union {
     struct kernel_appin_status          status;
     struct kernel_appin_conn_opened     conn_opened;
     struct kernel_appin_listen_newconn  listen_newconn;
     struct kernel_appin_accept_conn     accept_connection;
-    uint8_t raw[63];
+    uint8_t raw[RAW_BYTES];  // original 63 -> rdma 127
   } __attribute__((packed)) data;
   uint8_t type;
 } __attribute__((packed));
 
-STATIC_ASSERT(sizeof(struct kernel_appin) == 64, kernel_appin_size);
+STATIC_ASSERT(sizeof(struct kernel_appin) == RAW_BYTES+1, kernel_appin_size);
 
 #endif /* ndef KERNEL_APPIF_H_ */
