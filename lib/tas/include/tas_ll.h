@@ -113,6 +113,18 @@ struct flextcp_connection {
   /** pending tx bump to fast path */
   uint32_t txb_bump;
 
+  /* work queue / completion queue */
+  uint8_t *wq_base;
+  uint32_t wq_size;
+  uint32_t wq_len; /*> Number of pending work queue entries */
+  uint32_t wq_tail; /*> Offset to first unprocessed wq entry */
+  uint32_t cq_len; /*> Number of unread cq entries */
+  uint32_t cq_tail; /*> Offset to first unread cq entry */
+
+  /* Memory region */
+  uint8_t *mr;
+  uint32_t mr_len;
+
   uint32_t local_ip;
   uint32_t remote_ip;
   uint16_t local_port;
@@ -235,6 +247,19 @@ int flextcp_context_create(struct flextcp_context *ctx);
  */
 int flextcp_context_poll(struct flextcp_context *ctx, int num,
     struct flextcp_event *events);
+
+/**
+ * Poll fastpath rx queue for 'num' bytes of data in the provided
+ * connection's completion queue.
+ */
+int rdma_fastpath_poll(struct flextcp_context *ctx,
+    struct flextcp_connection *conn, int num);
+
+/**
+ * Bump fast path for a new RDMA wq entry
+ */
+int rdma_conn_bump(struct flextcp_context *ctx,
+    struct flextcp_connection *c);
 
 void flextcp_block(struct flextcp_context *ctx, int timeout_ms);
 
