@@ -55,6 +55,10 @@ struct configuration {
   uint64_t tcp_rxbuf_len;
   /** TCP transmit buffer size. */
   uint64_t tcp_txbuf_len;
+  /** RDMA memory region size. */
+  uint64_t rdma_mr_len;
+  /** RDMA work/completion queue size. */
+  uint64_t rdma_wq_len;
   /** Initial tcp rtt for cc rate [us]*/
   uint32_t tcp_rtt_init;
   /** Link bandwidth for converting window to rate [gbps] */

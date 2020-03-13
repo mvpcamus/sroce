@@ -47,6 +47,8 @@ enum cfg_params {
   CP_TCP_TXBUF_LEN,
   CP_TCP_HANDSHAKE_TO,
   CP_TCP_HANDSHAKE_RETRIES,
+  CP_RDMA_MR_LEN,
+  CP_RDMA_WQ_LEN,
   CP_CC,
   CP_CC_CONTROL_GRANULARITY,
   CP_CC_CONTROL_INTERVAL,
@@ -120,6 +122,12 @@ static struct option opts[] = {
     { .name = "tcp-handshake-retries",
       .has_arg = required_argument,
       .val = CP_TCP_HANDSHAKE_RETRIES },
+    { .name = "rmda-mr-len",
+      .has_arg = required_argument,
+      .val = CP_RDMA_MR_LEN },
+    { .name = "rmda-wq-len",
+      .has_arg = required_argument,
+      .val = CP_RDMA_WQ_LEN },
     { .name = "cc",
       .has_arg = required_argument,
       .val = CP_CC },
@@ -315,6 +323,18 @@ int config_parse(struct configuration *c, int argc, char *argv[])
       case CP_TCP_HANDSHAKE_RETRIES:
         if (parse_int32(optarg, &c->tcp_handshake_retries) != 0) {
           fprintf(stderr, "tcp handshake retries parsing failed\n");
+          goto failed;
+        }
+        break;
+      case CP_RDMA_MR_LEN:
+        if (parse_int64(optarg, &c->rdma_mr_len) != 0) {
+          fprintf(stderr, "rdma mr len parsing failed\n");
+          goto failed;
+        }
+        break;
+      case CP_RDMA_WQ_LEN:
+        if (parse_int64(optarg, &c->rdma_wq_len) != 0) {
+          fprintf(stderr, "rdma wq len parsing failed\n");
           goto failed;
         }
         break;
@@ -543,6 +563,8 @@ static int config_defaults(struct configuration *c, char *progname)
   c->tcp_txbuf_len = 8192;
   c->tcp_handshake_to = 10000;
   c->tcp_handshake_retries = 10;
+  c->rdma_mr_len = 64 * 1024;
+  c->rdma_wq_len = 20 * 64;
   c->cc_algorithm = CONFIG_CC_DCTCP_RATE;
   c->cc_control_granularity = 50;
   c->cc_control_interval = 2;

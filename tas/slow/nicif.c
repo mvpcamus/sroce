@@ -175,7 +175,8 @@ int nicif_appctx_add(uint16_t appid, uint32_t db, uint64_t *rxq_base,
 int nicif_connection_add(uint32_t db, uint64_t mac_remote, uint32_t ip_local,
     uint16_t port_local, uint32_t ip_remote, uint16_t port_remote,
     uint64_t rx_base, uint32_t rx_len, uint64_t tx_base, uint32_t tx_len,
-    uint32_t remote_seq, uint32_t local_seq, uint64_t app_opaque,
+    uint64_t wq_base, uint32_t wq_len, uint64_t mr_base, uint32_t mr_len,
+    uint64_t rq_base, uint32_t remote_seq, uint32_t local_seq, uint64_t app_opaque,
     uint32_t flags, uint32_t rate, uint32_t fn_core, uint16_t flow_group,
     uint32_t *pf_id)
 {
@@ -209,8 +210,13 @@ int nicif_connection_add(uint32_t db, uint64_t mac_remote, uint32_t ip_local,
   fs->opaque = app_opaque;
   fs->rx_base_sp = rx_base;
   fs->tx_base = tx_base;
+  fs->wq_base = wq_base;
+  fs->rq_base = rq_base;
+  fs->mr_base = mr_base;
   fs->rx_len = rx_len;
   fs->tx_len = tx_len;
+  fs->wq_len = wq_len;
+  fs->mr_len = mr_len;
   memcpy(&fs->remote_mac, &mac_remote, ETH_ADDR_LEN);
   fs->db_id = db;
 
@@ -228,6 +234,7 @@ int nicif_connection_add(uint32_t db, uint64_t mac_remote, uint32_t ip_local,
   fs->rx_next_seq = remote_seq;
   fs->rx_remote_avail = rx_len; /* XXX */
 
+  fs->txb_head = 0;
   fs->tx_sent = 0;
   fs->tx_next_pos = 0;
   fs->tx_next_seq = local_seq;
@@ -235,6 +242,14 @@ int nicif_connection_add(uint32_t db, uint64_t mac_remote, uint32_t ip_local,
   fs->tx_next_ts = 0;
   fs->tx_rate = rate;
   fs->rtt_est = 0;
+
+  fs->wqe_tx_seq = 0;
+  fs->wq_head = 0;
+  fs->wq_tail = 0;
+  fs->cq_head = 0;
+  fs->cq_tail = 0;
+  fs->rq_head = 0;
+  fs->rq_tail = 0;
 
   /* write to empty entry first */
   MEM_BARRIER();

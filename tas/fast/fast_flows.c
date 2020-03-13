@@ -584,6 +584,32 @@ unlock:
     fprintf(stderr, "dma_krx_pkt_fastpath: updating application state\n");
 #endif
 
+    /**
+     * TODO:
+     * If rx_bump: fast_rdmarq_bump() -> if cq_update, arx_cache_add()
+     * If tx_bump: rdma_poll_workqueue()
+     */
+    if (rx_bump != 0)
+    {
+      fast_rdmarq_bump(ctx, fs, rx_pos, rx_bump);
+    }
+
+    uint32_t old_avail, new_avail;
+    // copy packets into txbuf
+    old_avail = tcp_txavail(fs, NULL);
+    fast_rdma_poll(ctx, fs);
+    new_avail = tcp_txavail(fs, NULL);
+
+    if (old_avail < new_avail) {
+      if (qman_set(&ctx->qman, flow_id, fs->tx_rate, new_avail -
+            old_avail, TCP_MSS, QMAN_SET_RATE | QMAN_SET_MAXCHUNK
+            | QMAN_ADD_AVAIL) != 0)
+      {
+        fprintf(stderr, "fast_rdmawq_bump: qman_set failed, UNEXPECTED\n");
+        abort();
+      }
+    }
+
     uint16_t type;
     type = FLEXTCP_PL_ARX_CONNUPDATE;
 
@@ -610,7 +636,7 @@ unlock:
     trace_event(FLEXNIC_PL_TREV_ARX, sizeof(te_arx), &te_arx);
 #endif
 
-    arx_cache_add(ctx, fs->db_id, fs->opaque, rx_bump, rx_pos, tx_bump, type);
+    // arx_cache_add(ctx, fs->db_id, fs->opaque, rx_bump, rx_pos, tx_bump, type);
   }
 
   /* Flow control: More receiver space? -> might need to start sending */

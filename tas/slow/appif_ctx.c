@@ -84,8 +84,12 @@ void appif_conn_opened(struct connection *c, int status)
   if (status == 0) {
     kout->data.conn_opened.rx_off = c->rx_buf - (uint8_t *) tas_shm;
     kout->data.conn_opened.tx_off = c->tx_buf - (uint8_t *) tas_shm;
+    kout->data.conn_opened.mr_off = c->mr_buf - (uint8_t *) tas_shm;
+    kout->data.conn_opened.wq_off = c->wq_buf - (uint8_t *) tas_shm;
     kout->data.conn_opened.rx_len = c->rx_len;
     kout->data.conn_opened.tx_len = c->tx_len;
+    kout->data.conn_opened.mr_len = c->mr_len;
+    kout->data.conn_opened.wq_len = c->wq_len;
 
     kout->data.conn_opened.seq_rx = c->remote_seq;
     kout->data.conn_opened.seq_tx = c->local_seq;
@@ -201,8 +205,12 @@ void appif_accept_conn(struct connection *c, int status)
   if (status == 0) {
     kout->data.accept_connection.rx_off = c->rx_buf - (uint8_t *) tas_shm;
     kout->data.accept_connection.tx_off = c->tx_buf - (uint8_t *) tas_shm;
+    kout->data.accept_connection.mr_off = c->mr_buf - (uint8_t *) tas_shm;
+    kout->data.accept_connection.wq_off = c->wq_buf - (uint8_t *) tas_shm;
     kout->data.accept_connection.rx_len = c->rx_len;
     kout->data.accept_connection.tx_len = c->tx_len;
+    kout->data.accept_connection.mr_len = c->mr_len;
+    kout->data.accept_connection.wq_len = c->wq_len;
 
     kout->data.accept_connection.seq_rx = c->remote_seq;
     kout->data.accept_connection.seq_tx = c->local_seq;

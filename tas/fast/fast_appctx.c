@@ -55,7 +55,8 @@ int fast_appctx_poll_fetch(struct dataplane_context *ctx, uint32_t id,
 
   if (type == 0) {
     return -1;
-  } else if (type != FLEXTCP_PL_ATX_CONNUPDATE) {
+  } else if (type != FLEXTCP_PL_ATX_CONNUPDATE
+          && type != FLEXTCP_PL_ATX_RDMAUPDATE) {
     fprintf(stderr, "fast_appctx_poll: unknown type: %u id=%u\n", type,
         id);
     abort();
@@ -73,6 +74,7 @@ int fast_appctx_poll_fetch(struct dataplane_context *ctx, uint32_t id,
   void *fs = &fp_state->flowst[flow_id];
   rte_prefetch0(fs);
   rte_prefetch0(fs + 64);
+  rte_prefetch0(fs + 128);
 
   actx->tx_head += sizeof(*atx);
   if (actx->tx_head >= actx->tx_len)
@@ -87,9 +89,13 @@ int fast_appctx_poll_bump(struct dataplane_context *ctx, void *pqe,
   struct flextcp_pl_atx *atx = pqe;
   int ret;
 
-  ret = fast_flows_bump(ctx, atx->msg.connupdate.flow_id,
-      atx->msg.connupdate.bump_seq, atx->msg.connupdate.rx_bump,
-      atx->msg.connupdate.tx_bump, atx->msg.connupdate.flags, nbh, ts);
+  if (atx->type == FLEXTCP_PL_ATX_CONNUPDATE)
+    ret = fast_flows_bump(ctx, atx->msg.connupdate.flow_id,
+        atx->msg.connupdate.bump_seq, atx->msg.connupdate.rx_bump,
+        atx->msg.connupdate.tx_bump, atx->msg.connupdate.flags, nbh, ts);
+  else
+    ret = fast_rdmawq_bump(ctx, atx->msg.rdmaupdate.flow_id,
+        atx->msg.rdmaupdate.wq_head, atx->msg.rdmaupdate.cq_tail);
 
   if (ret != 0)
     ret = 1;

@@ -570,6 +570,9 @@ static int conn_syn_sent_packet(struct connection *c, const struct pkt_tcp *p,
   if (nicif_connection_add(c->db_id, c->remote_mac, c->local_ip, c->local_port,
         c->remote_ip, c->remote_port, c->rx_buf - (uint8_t *) tas_shm,
         c->rx_len, c->tx_buf - (uint8_t *) tas_shm, c->tx_len,
+        c->wq_buf - (uint8_t*) tas_shm, c->wq_len,
+        c->mr_buf - (uint8_t*) tas_shm, c->mr_len,
+        c->rq_buf - (uint8_t*) tas_shm,
         c->remote_seq, c->local_seq, c->opaque, c->flags, c->cc_rate,
         c->fn_core, c->flow_group, &c->flow_id)
       != 0)
@@ -633,7 +636,7 @@ static inline uint16_t port_alloc(void)
 static inline struct connection *conn_alloc(void)
 {
   struct connection *conn;
-  uintptr_t off_rx, off_tx;
+  uintptr_t off_rx, off_tx, off_mr, off_wq, off_rq;
 
   if ((conn = malloc(sizeof(*conn))) == NULL) {
     fprintf(stderr, "conn_alloc: malloc failed\n");
@@ -642,30 +645,62 @@ static inline struct connection *conn_alloc(void)
 
   if (packetmem_alloc(config.tcp_rxbuf_len, &off_rx, &conn->rx_handle) != 0) {
     fprintf(stderr, "conn_alloc: packetmem_alloc rx failed\n");
-    free(conn);
-    return NULL;
+    goto RXBUF_ALLOC_ERROR;
   }
 
   if (packetmem_alloc(config.tcp_txbuf_len, &off_tx, &conn->tx_handle) != 0) {
     fprintf(stderr, "conn_alloc: packetmem_alloc tx failed\n");
-    packetmem_free(conn->rx_handle);
-    free(conn);
-    return NULL;
+    goto TXBUF_ALLOC_ERROR;
+  }
+
+  if (packetmem_alloc(config.rdma_mr_len, &off_mr, &conn->mr_handle) != 0) {
+    fprintf(stderr, "conn_alloc: packetmem_alloc mr failed\n");
+    goto MRBUF_ALLOC_ERROR;
+  }
+
+  if (packetmem_alloc(config.rdma_wq_len, &off_wq, &conn->wq_handle) != 0) {
+    fprintf(stderr, "conn_alloc: packetmem_alloc wq failed\n");
+    goto WQBUF_ALLOC_ERROR;
+  }
+
+  if (packetmem_alloc(config.rdma_wq_len, &off_rq, &conn->rq_handle) != 0) {
+    fprintf(stderr, "conn_alloc: packetmem_alloc rq failed\n");
+    goto RQBUF_ALLOC_ERROR;
   }
 
   conn->rx_buf = (uint8_t *) tas_shm + off_rx;
   conn->rx_len = config.tcp_rxbuf_len;
   conn->tx_buf = (uint8_t *) tas_shm + off_tx;
   conn->tx_len = config.tcp_txbuf_len;
+  conn->mr_buf = (uint8_t *) tas_shm + off_mr;
+  conn->mr_len = config.rdma_mr_len;
+  conn->wq_buf = (uint8_t *) tas_shm + off_wq;
+  conn->wq_len = config.rdma_wq_len;
+  conn->rq_buf = (uint8_t *) tas_shm + off_rq;
   conn->to_armed = 0;
 
   return conn;
+
+RQBUF_ALLOC_ERROR:
+  packetmem_free(conn->wq_handle);
+WQBUF_ALLOC_ERROR:
+  packetmem_free(conn->mr_handle);
+MRBUF_ALLOC_ERROR:
+  packetmem_free(conn->tx_handle);
+TXBUF_ALLOC_ERROR:
+  packetmem_free(conn->rx_handle);
+RXBUF_ALLOC_ERROR:
+  free(conn);
+  return NULL;
 }
 
 static inline void conn_free(struct connection *conn)
 {
   packetmem_free(conn->tx_handle);
   packetmem_free(conn->rx_handle);
+  packetmem_free(conn->mr_handle);
+  packetmem_free(conn->wq_handle);
+  packetmem_free(conn->rq_handle);
   free(conn);
 }
 
@@ -943,6 +978,9 @@ static void listener_accept(struct listener *l)
   if (nicif_connection_add(c->db_id, c->remote_mac, c->local_ip, c->local_port,
         c->remote_ip, c->remote_port, c->rx_buf - (uint8_t *) tas_shm,
         c->rx_len, c->tx_buf - (uint8_t *) tas_shm, c->tx_len,
+        c->wq_buf - (uint8_t*) tas_shm, c->wq_len,
+        c->mr_buf - (uint8_t*) tas_shm, c->mr_len,
+        c->rq_buf - (uint8_t*) tas_shm,
         c->remote_seq, c->local_seq + 1, c->opaque, c->flags, c->cc_rate,
         c->fn_core, c->flow_group, &c->flow_id)
       != 0)

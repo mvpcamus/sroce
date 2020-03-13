@@ -75,6 +75,14 @@ int fast_flows_bump(struct dataplane_context *ctx, uint32_t flow_id,
     struct network_buf_handle *nbh, uint32_t ts);
 void fast_flows_retransmit(struct dataplane_context *ctx, uint32_t flow_id);
 
+/* fast_rdma.c */
+int fast_rdmawq_bump(struct dataplane_context *ctx, uint32_t flow_id,
+    uint32_t new_wq_head, uint32_t new_cq_tail);
+int fast_rdmarq_bump(struct dataplane_context* ctx,
+    struct flextcp_pl_flowst* fs, uint32_t prev_rx_head, uint32_t rx_bump);
+void fast_rdma_poll(struct dataplane_context* ctx,
+    struct flextcp_pl_flowst* fl);
+
 /*****************************************************************************/
 /* Helpers */
 

@@ -127,6 +127,10 @@ enum nicif_connection_flags {
  * @param rx_len      Length of circular receive buffer
  * @param tx_base     Base address of circular transmit buffer
  * @param tx_len      Length of circular transmit buffer
+ * @param wq_base     Work/Completion Queue base
+ * @param wq_len      Length of Work/Completion Queue buffer
+ * @param mr_base     RDMA memory region
+ * @param mr_len      Length of RDMA memory region
  * @param remote_seq  Next sequence number expected from remote host
  * @param local_seq   Next sequence number for transmission
  * @param app_opaque  Opaque value to pass in notificaitions
@@ -141,7 +145,8 @@ enum nicif_connection_flags {
 int nicif_connection_add(uint32_t db, uint64_t mac_remote, uint32_t ip_local,
     uint16_t port_local, uint32_t ip_remote, uint16_t port_remote,
     uint64_t rx_base, uint32_t rx_len, uint64_t tx_base, uint32_t tx_len,
-    uint32_t remote_seq, uint32_t local_seq, uint64_t app_opaque,
+    uint64_t wq_base, uint32_t wq_len, uint64_t mr_base, uint32_t mr_len,
+    uint64_t rq_base, uint32_t remote_seq, uint32_t local_seq, uint64_t app_opaque,
     uint32_t flags, uint32_t rate, uint32_t fn_core, uint16_t flow_group,
     uint32_t *pf_id);
 
@@ -438,14 +443,30 @@ struct connection {
     struct packetmem_handle *rx_handle;
     /** Memory manager handle for transmit buffer. */
     struct packetmem_handle *tx_handle;
+    /** Memory manager handle for memory region. */
+    struct packetmem_handle *mr_handle;
+    /** Memory manager handle for work queue. */
+    struct packetmem_handle *wq_handle;
+    /** Memory manager handle for request queue. */
+    struct packetmem_handle *rq_handle;
     /** Receive buffer pointer. */
     uint8_t *rx_buf;
     /** Transmit buffer pointer. */
     uint8_t *tx_buf;
+    /** Memory region pointer. */
+    uint8_t *mr_buf;
+    /** Work Queue pointer. */
+    uint8_t *wq_buf;
+    /** Request Queue pointer. */
+    uint8_t *rq_buf;
     /** Receive buffer size. */
     uint32_t rx_len;
     /** Transmit buffer size. */
     uint32_t tx_len;
+    /** Memory region size. */
+    uint32_t mr_len;
+    /** Work Queue size. */
+    uint32_t wq_len;
   /**@}*/
 
   /**
