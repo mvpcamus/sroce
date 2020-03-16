@@ -5,18 +5,20 @@ objs_sp := kernel.o packetmem.o appif.o appif_ctx.o nicif.o cc.o tcp.o arp.o \
   routing.o kni.o
 objs_fp := fastemu.o network.o qman.o trace.o fast_kernel.o fast_appctx.o \
   fast_flows.o
+objs_fp_rdma := fast_rdma.o
 
 TAS_OBJS := $(addprefix $(d)/, \
   $(objs_top) \
   $(addprefix slow/, $(objs_sp)) \
-  $(addprefix fast/, $(objs_fp)))
+  $(addprefix fast/, $(objs_fp) $(objs_fp_rdma)))
 
 exec := $(d)/tas
 
 TAS_CPPFLAGS := -Iinclude/ -I$(d)/include/ $(DPDK_CPPFLAGS)
 TAS_CFLAGS := $(DPDK_CFLAGS)
+TAS_RDMAFLAGS := -Ilib/rdma/include/
 
-$(TAS_OBJS): CPPFLAGS += $(TAS_CPPFLAGS)
+$(TAS_OBJS): CPPFLAGS += $(TAS_CPPFLAGS) $(TAS_RDMAFLAGS)
 $(TAS_OBJS): CFLAGS += $(TAS_CFLAGS)
 
 $(exec): LDFLAGS += $(DPDK_LDFLAGS)

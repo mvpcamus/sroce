@@ -9,4 +9,7 @@ include $(dir)/rules.mk
 dir := $(d)/sockets
 include $(dir)/rules.mk
 
+dir := $(d)/rdma
+include $(dir)/rules.mk
+
 include mk/subdir_post.mk

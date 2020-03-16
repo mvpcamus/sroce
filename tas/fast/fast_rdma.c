@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <stdint.h>
 
+#include <utils_sync.h>
+
 #include "fastpath.h"
 #include "packet_defs.h"
 #include "internal.h"
@@ -15,6 +17,14 @@
 
 #define RDMA_RQ_PENDING_PARSE 0x0
 #define RDMA_RQ_PENDING_DATA  0x10
+
+#if 1
+#define fs_lock(fs) util_spin_lock(&fs->lock)
+#define fs_unlock(fs) util_spin_unlock(&fs->lock)
+#else
+#define fs_lock(fs) do {} while (0)
+#define fs_unlock(fs) do {} while (0)
+#endif
 
 static inline void fast_rdma_txbuf_copy(struct flextcp_pl_flowst* fl,
       uint32_t len, void* src);
