@@ -8,7 +8,7 @@
 
 int main()
 {
-    const char ip[] = "10.0.0.101";
+    const char ip[] = "10.0.0.2";
     rdma_init();
     struct sockaddr_in localaddr, remoteaddr;
     localaddr.sin_family = AF_INET;
@@ -32,8 +32,11 @@ int main()
     {
         if (new_mr_base + 100 >= ((char*) mr_base + mr_len))
             new_mr_base = mr_base;
-
+        i++;
         int len = snprintf(new_mr_base, 100, "%s%u", name, i);
+
+fprintf(stderr, "len=%u, offset=%lu, mr_base=%p, mr_len=%u\n", len, new_mr_base-(char*)mr_base, mr_base, mr_len);
+
         int ret = rdma_write(fd, len, new_mr_base - (char*) mr_base, new_mr_base - (char*) mr_base);
         new_mr_base += len;
         fprintf(stderr, "WRITE ret=%d\n", ret);
@@ -41,7 +44,7 @@ int main()
             continue;
         ret = rdma_cq_poll(fd, cqe, 64);
         fprintf(stderr, "CQ_POLL ret=%d\n", ret);
-        if (ret < 0)
+        if (ret <= 0)
             break;
         int j;
         for(j = 0; j < ret; j++){

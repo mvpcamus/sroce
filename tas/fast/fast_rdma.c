@@ -26,8 +26,6 @@
 #define fs_unlock(fs) do {} while (0)
 #endif
 
-static inline void fast_rdma_txbuf_copy(struct flextcp_pl_flowst* fl,
-      uint32_t len, void* src);
 static inline void fast_rdma_rxbuf_copy(struct flextcp_pl_flowst* fl,
       uint32_t rx_head, uint32_t len, void* dst);
 static inline void fast_rdmacq_bump(struct flextcp_pl_flowst* fl,
@@ -347,49 +345,14 @@ static inline void fast_rdma_rxbuf_copy(struct flextcp_pl_flowst* fl,
   fl->rx_avail += len;
 }
 
-static inline void fast_rdma_txbuf_copy(struct flextcp_pl_flowst* fl,
-      uint32_t len, void* src)
-{
-  uintptr_t buf1, buf2;
-  uint32_t len1, len2;
-
-  uint32_t txbuf_len = fl->tx_len;
-  uint32_t txbuf_head = fl->txb_head;
-
-  if (txbuf_head + len > txbuf_len)
-  {
-    len1 = (txbuf_len - txbuf_head);
-    len2 = (len - len1);
-  }
-  else
-  {
-    len1 = len;
-    len2 = 0;
-  }
-
-  buf1 = (uintptr_t) (fl->tx_base + txbuf_head);
-  buf2 = (uintptr_t) (fl->tx_base);
-
-  dma_write(buf1, len1, src);
-  if (len2)
-    dma_write(buf2, len2, src + len1);
-
-  txbuf_head += len;
-  if (txbuf_head >= txbuf_len)
-    txbuf_head -= txbuf_len;
-
-  fl->txb_head = txbuf_head;
-  fl->tx_avail += len;
-}
-
 /* Transmit atmost one WQE */
 static inline int fast_rdmawqe_tx(struct flextcp_pl_flowst* fl,
     struct rdma_wqe* wqe, int is_request)
 {
   uint32_t tx_seq, tx_len;
   uint32_t free_txbuf_len, wqe_tx_pending_len;
-  struct rdma_hdr hdr;
-  void* mr_buf;
+//  struct rdma_hdr hdr;
+//  void* mr_buf;
 
   tx_seq = fl->wqe_tx_seq;
   free_txbuf_len = fl->tx_len - fl->tx_avail - fl->tx_sent;
@@ -400,6 +363,7 @@ static inline int fast_rdmawqe_tx(struct flextcp_pl_flowst* fl,
   }
   else
   {
+#if 0
     hdr.type = (is_request ? RDMA_REQUEST : RDMA_RESPONSE)
                  | (wqe->type == RDMA_OP_READ ? RDMA_READ : RDMA_WRITE);
     hdr.status = (is_request ? 0 : wqe->status);
@@ -408,11 +372,14 @@ static inline int fast_rdmawqe_tx(struct flextcp_pl_flowst* fl,
     hdr.id = t_beui32(wqe->id);
     hdr.flags = t_beui16(0);
 
-    fast_rdma_txbuf_copy(fl, sizeof(struct rdma_hdr), &hdr);
+fprintf(stderr, "hdr: type=%u stat=%u len=%u offset=%u id=%u\n", hdr.type, hdr.status, wqe->len, wqe->roff, wqe->id);
+#endif
 
-    free_txbuf_len -= sizeof(struct rdma_hdr);
+//fl->tx_avail += sizeof(struct rdma_hdr); //fast_rdma_txbuf_copy(fl, sizeof(struct rdma_hdr), &hdr);
+
+//    free_txbuf_len -= sizeof(struct rdma_hdr);
     tx_seq = 0;
-    wqe_tx_pending_len = wqe->len;
+    wqe_tx_pending_len = wqe->len + sizeof(struct rdma_hdr);
 
     if (is_request)
     {
@@ -440,8 +407,21 @@ static inline int fast_rdmawqe_tx(struct flextcp_pl_flowst* fl,
   }
 
   tx_len = MIN(wqe_tx_pending_len, free_txbuf_len);
-  mr_buf = dma_pointer(fl->mr_base + wqe->loff + tx_seq, wqe_tx_pending_len);
-  fast_rdma_txbuf_copy(fl, tx_len, mr_buf);
+//  mr_buf = dma_pointer(fl->mr_base + wqe->loff + tx_seq, wqe_tx_pending_len);
+
+// tx only if there is no previous wqe pending
+fl->tx_avail += tx_len;
+fl->txb_head += sizeof(struct rdma_wqe);
+
+/*
+if (!fl->tx_avail) {
+  fl->tx_avail += tx_len; //fast_rdma_txbuf_copy(fl, tx_len, mr_buf);
+} else {
+  fl->txb_head += tx_len;
+  fprintf(stderr, "enqueue wqe tx: txb_head=%u\n", fl->txb_head);
+}
+*/
+
   tx_seq += tx_len;
 
   free_txbuf_len -= tx_len;

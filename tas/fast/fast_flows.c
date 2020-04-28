@@ -33,11 +33,14 @@
 #include "internal.h"
 #include "fastemu.h"
 #include "tcp_common.h"
+#include "tas_rdma.h"
 
 #define TCP_MSS 1448
 #define TCP_MAX_RTT 100000
 
 //#define SKIP_ACK 1
+#define PL_DEBUG_ATX 1
+#define PL_DEBUG_ARX 1
 
 struct flow_key {
   ip_addr_t local_ip;
@@ -54,9 +57,10 @@ struct flow_key {
 #define fs_unlock(fs) do {} while (0)
 #endif
 
-
+/*
 static void flow_tx_read(struct flextcp_pl_flowst *fs, uint32_t pos,
     uint16_t len, void *dst);
+*/
 static void flow_rx_write(struct flextcp_pl_flowst *fs, uint32_t pos,
     uint16_t len, const void *src);
 #ifdef FLEXNIC_PL_OOO_RECV
@@ -74,6 +78,16 @@ static void flow_reset_retransmit(struct flextcp_pl_flowst *fs);
 
 static inline void tcp_checksums(struct network_buf_handle *nbh,
     struct pkt_tcp *p, beui32_t ip_s, beui32_t ip_d, uint16_t l3_paylen);
+
+#ifdef DOING_NOW
+static inline uint32_t wqe_txavail(const struct flextcp_pl_flowst *fs)
+{
+  uint32_t wqe_avail;
+  wqe_avail = fs->wq_head - fs->wq_tail;
+  // TODO: calculate tx bytes for each wqe
+  return wqe_avail;
+}
+#endif
 
 void fast_flows_qman_pf(struct dataplane_context *ctx, uint32_t *queues,
     uint16_t n)
@@ -140,7 +154,12 @@ int fast_flows_qman(struct dataplane_context *ctx, uint32_t queue,
   }
 
   /* calculate how much is available to be sent */
+#ifndef DOING_NOW
   avail = tcp_txavail(fs, NULL);
+#else
+  avail = wqe_txavail(fs);
+  fprintf(stderr, "wqe_txavail: %u\n", avail);
+#endif
 
 #if PL_DEBUG_ATX
   fprintf(stderr, "ATX try_sendseg local=%08x:%05u remote=%08x:%05u "
@@ -333,11 +352,11 @@ int fast_flows_packet(struct dataplane_context *ctx,
 #if PL_DEBUG_ARX
   fprintf(stderr, "FLOW local=%08x:%05u remote=%08x:%05u  ST: op=%"PRIx64
       " rx_pos=%x rx_next_seq=%u rx_avail=%x  tx_pos=%x tx_next_seq=%u"
-      " tx_sent=%u sp=%u\n",
+      " tx_sent=%u\n",
       f_beui32(p->ip.dest), f_beui16(p->tcp.dest),
       f_beui32(p->ip.src), f_beui16(p->tcp.src), fs->opaque, fs->rx_next_pos,
       fs->rx_next_seq, fs->rx_avail, fs->tx_next_pos, fs->tx_next_seq,
-      fs->tx_sent, fs->slowpath);
+      fs->tx_sent);
 #endif
 
   /* state indicates slow path */
@@ -855,6 +874,7 @@ out:
 }
 
 /* read `len` bytes from position `pos` in cirucular transmit buffer */
+/*
 static void flow_tx_read(struct flextcp_pl_flowst *fs, uint32_t pos,
     uint16_t len, void *dst)
 {
@@ -867,7 +887,7 @@ static void flow_tx_read(struct flextcp_pl_flowst *fs, uint32_t pos,
     dma_read(fs->tx_base + pos, part, dst);
     dma_read(fs->tx_base, len - part, (uint8_t *) dst + part);
   }
-}
+}*/
 
 /* write `len` bytes to position `pos` in cirucular receive buffer */
 static void flow_rx_write(struct flextcp_pl_flowst *fs, uint32_t pos,
@@ -953,7 +973,51 @@ static void flow_tx_segment(struct dataplane_context *ctx,
 
   /* add payload if requested */
   if (payload > 0) {
+#if 0
     flow_tx_read(fs, payload_pos, payload, (uint8_t *) p + hdrs_len);
+#else
+    // send rdma header
+    struct rdma_wqe* wqe;
+    struct rdma_hdr hdr;
+    void* mr_buf;
+    uint8_t* pkt_buf;
+    uint32_t residual = payload;
+
+    pkt_buf = (uint8_t*) p;
+    pkt_buf += hdrs_len; //point after TCP headers
+
+    while (residual && fs->txb_head) {
+
+fprintf(stderr, "wqe_tx_seq=%u rqe_tx_seq=%u tx_avail=%u tx_sent=%u\n", fs->wqe_tx_seq, fs->rqe_tx_seq, fs->tx_avail, fs->tx_sent);
+        wqe = dma_pointer(fs->wq_base + fs->wqe_tx_seq, sizeof(struct rdma_wqe));
+        assert(wqe->type);
+
+        //TODO: rdma write / rdma read
+        hdr.type = RDMA_REQUEST | RDMA_WRITE;
+        hdr.status = 0;
+        hdr.length = t_beui32(wqe->len);
+        hdr.offset = t_beui32(wqe->roff);
+        hdr.id = t_beui32(wqe->id);
+        hdr.flags = t_beui16(0);
+fprintf(stderr, "hdr2: type=%u,%u stat=%u len=%u offset=%u id=%u\n", hdr.type, wqe->type, hdr.status, wqe->len, wqe->roff, wqe->id);
+        rte_memcpy(pkt_buf, &hdr, sizeof(struct rdma_hdr));
+        residual -= sizeof(struct rdma_hdr);
+
+        // send rdma payload
+        pkt_buf += sizeof(struct rdma_hdr);
+        mr_buf = dma_pointer(fs->mr_base + wqe->loff, wqe->len);
+        rte_memcpy(pkt_buf, mr_buf, wqe->len);
+fprintf(stderr, "payload: %s, mr_base: %p mr_len: %u wq_len: %u\n", (char*)mr_buf, (uint8_t *)(fs->mr_base + tas_shm), fs->mr_len, fs->wq_len);
+        wqe->status = RDMA_SUCCESS;
+
+        // update sent wqe position
+        fs->wqe_tx_seq += sizeof(struct rdma_wqe);
+        fs->txb_head -= sizeof(struct rdma_wqe);
+        pkt_buf += wqe->len;
+        residual -= wqe->len;
+fprintf(stderr, "txb_head: %u, residual: %u\n", fs->txb_head, residual);
+    }
+#endif
   }
 
   /* checksums */
