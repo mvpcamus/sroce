@@ -345,99 +345,6 @@ static inline void fast_rdma_rxbuf_copy(struct flextcp_pl_flowst* fl,
   fl->rx_avail += len;
 }
 
-/* Transmit atmost one WQE */
-static inline int fast_rdmawqe_tx(struct flextcp_pl_flowst* fl,
-    struct rdma_wqe* wqe, int is_request)
-{
-  uint32_t tx_seq, tx_len;
-  uint32_t free_txbuf_len, wqe_tx_pending_len;
-//  struct rdma_hdr hdr;
-//  void* mr_buf;
-
-  tx_seq = fl->wqe_tx_seq;
-  free_txbuf_len = fl->tx_len - fl->tx_avail - fl->tx_sent;
-
-  if (wqe->status == RDMA_TX_PENDING)
-  {
-    wqe_tx_pending_len = wqe->len - tx_seq;
-  }
-  else
-  {
-#if 0
-    hdr.type = (is_request ? RDMA_REQUEST : RDMA_RESPONSE)
-                 | (wqe->type == RDMA_OP_READ ? RDMA_READ : RDMA_WRITE);
-    hdr.status = (is_request ? 0 : wqe->status);
-    hdr.length = t_beui32(wqe->len);
-    hdr.offset = t_beui32(wqe->roff);
-    hdr.id = t_beui32(wqe->id);
-    hdr.flags = t_beui16(0);
-
-fprintf(stderr, "hdr: type=%u stat=%u len=%u offset=%u id=%u\n", hdr.type, hdr.status, wqe->len, wqe->roff, wqe->id);
-#endif
-
-//fl->tx_avail += sizeof(struct rdma_hdr); //fast_rdma_txbuf_copy(fl, sizeof(struct rdma_hdr), &hdr);
-
-//    free_txbuf_len -= sizeof(struct rdma_hdr);
-    tx_seq = 0;
-    wqe_tx_pending_len = wqe->len + sizeof(struct rdma_hdr);
-
-    if (is_request)
-    {
-      if (wqe->type == RDMA_OP_READ)
-      {
-        wqe->status = RDMA_RESP_PENDING;
-        return 0;
-      }
-      else
-      {
-        wqe->status = RDMA_TX_PENDING;
-      }
-    }
-    else
-    {
-      if (wqe->status == RDMA_SUCCESS && wqe->type == RDMA_OP_READ)
-      {
-        wqe->status = RDMA_TX_PENDING;
-      }
-      else
-      {
-        return 0;
-      }
-    }    
-  }
-
-  tx_len = MIN(wqe_tx_pending_len, free_txbuf_len);
-//  mr_buf = dma_pointer(fl->mr_base + wqe->loff + tx_seq, wqe_tx_pending_len);
-
-// tx only if there is no previous wqe pending
-fl->tx_avail += tx_len;
-fl->txb_head += sizeof(struct rdma_wqe);
-
-/*
-if (!fl->tx_avail) {
-  fl->tx_avail += tx_len; //fast_rdma_txbuf_copy(fl, tx_len, mr_buf);
-} else {
-  fl->txb_head += tx_len;
-  fprintf(stderr, "enqueue wqe tx: txb_head=%u\n", fl->txb_head);
-}
-*/
-
-  tx_seq += tx_len;
-
-  free_txbuf_len -= tx_len;
-  wqe_tx_pending_len -= tx_len;
-
-  if (!wqe_tx_pending_len)
-  {
-    if (is_request)
-      wqe->status = RDMA_RESP_PENDING;
-    else
-      wqe->status = RDMA_SUCCESS;
-  }
-
-  return wqe_tx_pending_len;
-}
-
 void fast_rdma_poll(struct dataplane_context* ctx,
       struct flextcp_pl_flowst* fl)
 {
@@ -451,11 +358,13 @@ void fast_rdma_poll(struct dataplane_context* ctx,
   rq_tail = fl->rq_tail;
   free_txbuf_len = fl->tx_len - fl->tx_avail - fl->tx_sent;
 
+  // there is something on going tx
   if (fl->wqe_tx_seq > 0)
   {
     is_rqe = 0;
     tx_seq = fl->wqe_tx_seq;
   }
+  // there is something on going rx
   else if (fl->rqe_tx_seq > 0)
   {
     is_rqe = 1;
@@ -469,21 +378,25 @@ void fast_rdma_poll(struct dataplane_context* ctx,
 
   while (free_txbuf_len > 0)
   {
+    // nothing in queue
     if (rq_head == rq_tail && wq_head == wq_tail)
       break;
 
+    // nothing to tx then switch to rx
     if (!is_rqe && wq_head == wq_tail)
     {
       is_rqe = 1;
       continue;
     }
 
+    // nothing to rx then switch to tx
     if (is_rqe && rq_head == rq_tail)
     {
       is_rqe = 0;
       continue;
     }
 
+    // handle tx
     if (!is_rqe)
     {
       wqe = dma_pointer(fl->wq_base + wq_tail, sizeof(struct rdma_wqe));
@@ -495,6 +408,7 @@ void fast_rdma_poll(struct dataplane_context* ctx,
         goto NEXT_WQE;
       }
     }
+    // handle rx
     else
     {
       wqe = dma_pointer(fl->rq_base + rq_tail, sizeof(struct rdma_wqe));
@@ -507,14 +421,20 @@ void fast_rdma_poll(struct dataplane_context* ctx,
         break;
     }
 
+    fl->tx_avail += sizeof(struct rdma_hdr) + wqe->len; //PROTO
+    fl->txb_head += sizeof(struct rdma_wqe); //PROTO
+
+/* TODO: handle wqe that needs multiple packets
     ret = fast_rdmawqe_tx(fl, wqe, !is_rqe);
     if (ret > 0)
     {
       tx_seq = wqe->len - ret;
       break;
     }
+*/
 
 NEXT_WQE:
+    // update wq/rq tail
     if (is_rqe)
     {
       rq_tail += sizeof(struct rdma_wqe);

@@ -79,13 +79,24 @@ static void flow_reset_retransmit(struct flextcp_pl_flowst *fs);
 static inline void tcp_checksums(struct network_buf_handle *nbh,
     struct pkt_tcp *p, beui32_t ip_s, beui32_t ip_d, uint16_t l3_paylen);
 
+//#define DOING_NOW
 #ifdef DOING_NOW
 static inline uint32_t wqe_txavail(const struct flextcp_pl_flowst *fs)
 {
-  uint32_t wqe_avail;
+  uint32_t wqe_avail, fc_avail, tx_avail = 0;
+  struct rdma_wqe* wqe;
   wqe_avail = fs->wq_head - fs->wq_tail;
+
   // TODO: calculate tx bytes for each wqe
-  return wqe_avail;
+  // sum byte between wq_head and wq_tail, each wqe has wqe->len bytes
+  if (wqe_avail) {
+    wqe = dma_pointer(fs->wq_base + fs->wq_tail, sizeof(struct rdma_wqe));
+    tx_avail += wqe->len;
+  }
+  /* flow control window */
+  fc_avail = fs->rx_remote_avail - fs->tx_sent;
+//  wqe_avail < fc_avail ? wqe_avail : fc_avail;
+  return tx_avail;
 }
 #endif
 
