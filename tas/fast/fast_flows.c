@@ -79,27 +79,6 @@ static void flow_reset_retransmit(struct flextcp_pl_flowst *fs);
 static inline void tcp_checksums(struct network_buf_handle *nbh,
     struct pkt_tcp *p, beui32_t ip_s, beui32_t ip_d, uint16_t l3_paylen);
 
-//#define DOING_NOW
-#ifdef DOING_NOW
-static inline uint32_t wqe_txavail(const struct flextcp_pl_flowst *fs)
-{
-  uint32_t wqe_avail, fc_avail, tx_avail = 0;
-  struct rdma_wqe* wqe;
-  wqe_avail = fs->wq_head - fs->wq_tail;
-
-  // TODO: calculate tx bytes for each wqe
-  // sum byte between wq_head and wq_tail, each wqe has wqe->len bytes
-  if (wqe_avail) {
-    wqe = dma_pointer(fs->wq_base + fs->wq_tail, sizeof(struct rdma_wqe));
-    tx_avail += wqe->len;
-  }
-  /* flow control window */
-  fc_avail = fs->rx_remote_avail - fs->tx_sent;
-//  wqe_avail < fc_avail ? wqe_avail : fc_avail;
-  return tx_avail;
-}
-#endif
-
 void fast_flows_qman_pf(struct dataplane_context *ctx, uint32_t *queues,
     uint16_t n)
 {
@@ -165,12 +144,7 @@ int fast_flows_qman(struct dataplane_context *ctx, uint32_t queue,
   }
 
   /* calculate how much is available to be sent */
-#ifndef DOING_NOW
   avail = tcp_txavail(fs, NULL);
-#else
-  avail = wqe_txavail(fs);
-  fprintf(stderr, "wqe_txavail: %u\n", avail);
-#endif
 
 #if PL_DEBUG_ATX
   fprintf(stderr, "ATX try_sendseg local=%08x:%05u remote=%08x:%05u "
@@ -223,6 +197,7 @@ int fast_flows_qman(struct dataplane_context *ctx, uint32_t queue,
     len--;
   }
 
+fprintf(stderr, " flow_tx_segment: len=%u\n", len);
   /* send out segment */
   flow_tx_segment(ctx, nbh, fs, tx_seq, ack, rx_wnd, len, tx_pos,
       fs->tx_next_ts, ts, fin);
@@ -992,14 +967,13 @@ static void flow_tx_segment(struct dataplane_context *ctx,
     struct rdma_hdr hdr;
     void* mr_buf;
     uint8_t* pkt_buf;
-    uint32_t residual = payload;
+    int32_t residual = (int32_t) payload;
 
     pkt_buf = (uint8_t*) p;
     pkt_buf += hdrs_len; //point after TCP headers
 
-    while (residual && fs->txb_head) {
-
-fprintf(stderr, "wqe_tx_seq=%u rqe_tx_seq=%u tx_avail=%u tx_sent=%u\n", fs->wqe_tx_seq, fs->rqe_tx_seq, fs->tx_avail, fs->tx_sent);
+    while (residual>0 && fs->txb_head) {
+fprintf(stderr, "  wqe_tx_seq=%u rqe_tx_seq=%u tx_avail=%u tx_sent=%u\n", fs->wqe_tx_seq, fs->rqe_tx_seq, fs->tx_avail, fs->tx_sent);
         wqe = dma_pointer(fs->wq_base + fs->wqe_tx_seq, sizeof(struct rdma_wqe));
         assert(wqe->type);
 
@@ -1010,7 +984,7 @@ fprintf(stderr, "wqe_tx_seq=%u rqe_tx_seq=%u tx_avail=%u tx_sent=%u\n", fs->wqe_
         hdr.offset = t_beui32(wqe->roff);
         hdr.id = t_beui32(wqe->id);
         hdr.flags = t_beui16(0);
-fprintf(stderr, "hdr2: type=%u,%u stat=%u len=%u offset=%u id=%u\n", hdr.type, wqe->type, hdr.status, wqe->len, wqe->roff, wqe->id);
+fprintf(stderr, "  hdr2: type=%u,%u stat=%u len=%u offset=%u id=%u\n", hdr.type, wqe->type, hdr.status, wqe->len, wqe->roff, wqe->id);
         rte_memcpy(pkt_buf, &hdr, sizeof(struct rdma_hdr));
         residual -= sizeof(struct rdma_hdr);
 
@@ -1018,15 +992,20 @@ fprintf(stderr, "hdr2: type=%u,%u stat=%u len=%u offset=%u id=%u\n", hdr.type, w
         pkt_buf += sizeof(struct rdma_hdr);
         mr_buf = dma_pointer(fs->mr_base + wqe->loff, wqe->len);
         rte_memcpy(pkt_buf, mr_buf, wqe->len);
-fprintf(stderr, "payload: %s, mr_base: %p mr_len: %u wq_len: %u\n", (char*)mr_buf, (uint8_t *)(fs->mr_base + tas_shm), fs->mr_len, fs->wq_len);
-        wqe->status = RDMA_SUCCESS;
+fprintf(stderr, "  payload: %s, mr_base: %p mr_len: %u wq_len: %u\n", (char*)mr_buf, (uint8_t *)(fs->mr_base + tas_shm), fs->mr_len, fs->wq_len);
+        wqe->status = RDMA_RESP_PENDING;
 
         // update sent wqe position
+        fs->wq_tail += sizeof(struct rdma_wqe); //TODO: check wq_tail < wq_head
+        if (fs->wq_tail >= fs->wq_len)
+          fs->wq_tail -= fs->wq_len;
         fs->wqe_tx_seq += sizeof(struct rdma_wqe);
+        if (fs->wqe_tx_seq >= fs->wq_len)
+          fs->wqe_tx_seq -= fs->wq_len;
         fs->txb_head -= sizeof(struct rdma_wqe);
         pkt_buf += wqe->len;
         residual -= wqe->len;
-fprintf(stderr, "txb_head: %u, residual: %u\n", fs->txb_head, residual);
+fprintf(stderr, "  txb_head: %u, residual: %u\n", fs->txb_head, residual);
     }
 #endif
   }

@@ -6,6 +6,8 @@
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 
+#define WQSIZE 5
+
 int main()
 {
     const char ip[] = "10.0.0.2";
@@ -25,33 +27,34 @@ int main()
         fprintf(stderr, "Connection failed\n");
 
     const char name[] = "foobar";
-    int i = 0;
+    int i = 1;
     char* new_mr_base = mr_base;
-    struct rdma_wqe cqe[50];
+    struct rdma_wqe cqe[WQSIZE];
     while (1)
     {
         if (new_mr_base + 100 >= ((char*) mr_base + mr_len))
             new_mr_base = mr_base;
-        i++;
         int len = snprintf(new_mr_base, 100, "%s%u", name, i);
 
-fprintf(stderr, "len=%u, offset=%lu, mr_base=%p, mr_len=%u\n", len, new_mr_base-(char*)mr_base, mr_base, mr_len);
+fprintf(stderr, "%s, len=%u, offset=%lu, mr_base=%p, new_mr_base=%p\n", new_mr_base, len, new_mr_base-(char*)mr_base, mr_base, new_mr_base);
 
         int ret = rdma_write(fd, len, new_mr_base - (char*) mr_base, new_mr_base - (char*) mr_base);
-        new_mr_base += len;
         fprintf(stderr, "WRITE ret=%d\n", ret);
-        if (ret >= 0)
-            continue;
-        ret = rdma_cq_poll(fd, cqe, 64);
+        if (ret >= 0) {
+          i++;
+          new_mr_base += len;
+          continue;
+        }
+        ret = rdma_cq_poll(fd, cqe, WQSIZE);
         fprintf(stderr, "CQ_POLL ret=%d\n", ret);
-        if (ret <= 0)
+        if (ret < 0)
             break;
         int j;
         for(j = 0; j < ret; j++){
             if(cqe[j].status != RDMA_SUCCESS){
                 fprintf(stderr, "RDMA_STATUS: id=%d, status=%d\n",
                         cqe[j].id, cqe[j].status);
-                return -1;
+//                return -1;
             }
         }
     }
