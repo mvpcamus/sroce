@@ -39,8 +39,8 @@
 #define TCP_MAX_RTT 100000
 
 //#define SKIP_ACK 1
-#define PL_DEBUG_ATX 1
-#define PL_DEBUG_ARX 1
+//#define PL_DEBUG_ATX 1
+//#define PL_DEBUG_ARX 1
 
 struct flow_key {
   ip_addr_t local_ip;
@@ -197,7 +197,9 @@ int fast_flows_qman(struct dataplane_context *ctx, uint32_t queue,
     len--;
   }
 
-fprintf(stderr, " flow_tx_segment: len=%u\n", len);
+#ifdef DEBUG_MSG
+  fprintf(stderr, " flow_tx_segment: len=%u\n", len);
+#endif
   /* send out segment */
   flow_tx_segment(ctx, nbh, fs, tx_seq, ack, rx_wnd, len, tx_pos,
       fs->tx_next_ts, ts, fin);
@@ -958,10 +960,11 @@ static void flow_tx_segment(struct dataplane_context *ctx,
   opt_ts->ts_ecr = t_beui32(ts_echo);
 
   /* add payload if requested */
+#ifdef DEBUG_MSG
+  fprintf(stderr, "  tcp packet generated.\n");
+#endif
+
   if (payload > 0) {
-#if 0
-    flow_tx_read(fs, payload_pos, payload, (uint8_t *) p + hdrs_len);
-#else
     // send rdma header
     struct rdma_wqe* wqe;
     struct rdma_hdr hdr;
@@ -973,41 +976,53 @@ static void flow_tx_segment(struct dataplane_context *ctx,
     pkt_buf += hdrs_len; //point after TCP headers
 
     while (residual>0 && fs->txb_head) {
-fprintf(stderr, "  wqe_tx_seq=%u rqe_tx_seq=%u tx_avail=%u tx_sent=%u\n", fs->wqe_tx_seq, fs->rqe_tx_seq, fs->tx_avail, fs->tx_sent);
-        wqe = dma_pointer(fs->wq_base + fs->wqe_tx_seq, sizeof(struct rdma_wqe));
-        assert(wqe->type);
-
-        //TODO: rdma write / rdma read
-        hdr.type = RDMA_REQUEST | RDMA_WRITE;
-        hdr.status = 0;
-        hdr.length = t_beui32(wqe->len);
-        hdr.offset = t_beui32(wqe->roff);
-        hdr.id = t_beui32(wqe->id);
-        hdr.flags = t_beui16(0);
-fprintf(stderr, "  hdr2: type=%u,%u stat=%u len=%u offset=%u id=%u\n", hdr.type, wqe->type, hdr.status, wqe->len, wqe->roff, wqe->id);
-        rte_memcpy(pkt_buf, &hdr, sizeof(struct rdma_hdr));
-        residual -= sizeof(struct rdma_hdr);
-
-        // send rdma payload
-        pkt_buf += sizeof(struct rdma_hdr);
-        mr_buf = dma_pointer(fs->mr_base + wqe->loff, wqe->len);
-        rte_memcpy(pkt_buf, mr_buf, wqe->len);
-fprintf(stderr, "  payload: %s, mr_base: %p mr_len: %u wq_len: %u\n", (char*)mr_buf, (uint8_t *)(fs->mr_base + tas_shm), fs->mr_len, fs->wq_len);
-        wqe->status = RDMA_RESP_PENDING;
-
-        // update sent wqe position
-        fs->wq_tail += sizeof(struct rdma_wqe); //TODO: check wq_tail < wq_head
-        if (fs->wq_tail >= fs->wq_len)
-          fs->wq_tail -= fs->wq_len;
-        fs->wqe_tx_seq += sizeof(struct rdma_wqe);
-        if (fs->wqe_tx_seq >= fs->wq_len)
-          fs->wqe_tx_seq -= fs->wq_len;
-        fs->txb_head -= sizeof(struct rdma_wqe);
-        pkt_buf += wqe->len;
-        residual -= wqe->len;
-fprintf(stderr, "  txb_head: %u, residual: %u\n", fs->txb_head, residual);
-    }
+#ifdef DEBUG_MSG
+      fprintf(stderr, "  wqe_tx_seq=%u rqe_tx_seq=%u tx_avail=%u tx_sent=%u\n",
+              fs->wqe_tx_seq, fs->rqe_tx_seq, fs->tx_avail, fs->tx_sent);
 #endif
+      wqe = dma_pointer(fs->wq_base + fs->wqe_tx_seq, sizeof(struct rdma_wqe));
+#ifdef DEBUG_MSG
+      assert(wqe->type);
+      assert(wqe->status == RDMA_TX_PENDING);
+#endif
+      //TODO: distinguish rdma write / rdma read
+      hdr.type = RDMA_REQUEST | RDMA_WRITE;
+      hdr.status = 0;
+      hdr.length = t_beui32(wqe->len);
+      hdr.offset = t_beui32(wqe->roff);
+      hdr.id = t_beui32(wqe->id);
+      hdr.flags = t_beui16(0);
+#ifdef DEBUG_MSG
+      fprintf(stderr, "  hdr2: type=%u,%u stat=%u len=%u offset=%u id=%u\n",
+              hdr.type, wqe->type, hdr.status, wqe->len, wqe->roff, wqe->id);
+#endif
+      memcpy(pkt_buf, &hdr, sizeof(struct rdma_hdr));
+      residual -= sizeof(struct rdma_hdr);
+
+      // send rdma payload
+      pkt_buf += sizeof(struct rdma_hdr);
+      mr_buf = dma_pointer(fs->mr_base + wqe->loff, wqe->len);
+      memcpy(pkt_buf, mr_buf, wqe->len);
+#ifdef DEBUG_MSG
+      fprintf(stderr, "  payload: %s, mr_base: %p mr_len: %u wq_len: %u\n",
+              (char*)mr_buf, (uint8_t *)(fs->mr_base + tas_shm), fs->mr_len, fs->wq_len);
+#endif
+      wqe->status = RDMA_SUCCESS; //RDMA_RESP_PENDING;
+
+      // update sent wqe position
+      /* Don't need to update wq_tail because it will be done at fast_rdma_poll()
+      if (fs->wq_tail < fs->wq_head) fs->wq_tail += sizeof(struct rdma_wqe);
+      if (fs->wq_tail >= fs->wq_len) fs->wq_tail -= fs->wq_len; */
+      fs->wqe_tx_seq += sizeof(struct rdma_wqe);
+      if (fs->wqe_tx_seq >= fs->wq_len)
+        fs->wqe_tx_seq -= fs->wq_len;
+      fs->txb_head -= sizeof(struct rdma_wqe);
+      pkt_buf += wqe->len;
+      residual -= wqe->len;
+#ifdef DEBUG_MSG
+      fprintf(stderr, "  txb_head: %u, residual: %u\n", fs->txb_head, residual);
+#endif
+    }
   }
 
   /* checksums */

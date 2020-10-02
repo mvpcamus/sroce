@@ -41,10 +41,15 @@ static inline uint32_t wqe_txavail(const struct flextcp_pl_flowst *fs)
   struct rdma_wqe* wqe;
   wqe_avail = fs->wq_head - fs->wq_tail;
 
-  // TODO: calculate tx bytes for each wqe
+#ifdef DEBUG_MSG
+  fprintf(stderr, "wqe_avail= %d, wq_head= %d, wq_tail= %d, wq_len= %d\n",
+          wqe_avail, fs->wq_head, fs->wq_tail, fs->wq_len);
+#endif
+
+  // TODO?: calculate tx bytes for each wqe
   // sum byte between wq_head and wq_tail, each wqe has wqe->len bytes
   if (wqe_avail) {
-    wqe = dma_pointer(fs->wq_base + fs->wq_tail, sizeof(struct rdma_wqe));
+    wqe = dma_pointer(fs->wq_base + fs->wqe_tx_seq, sizeof(struct rdma_wqe));
     if (wqe->status == RDMA_PENDING) {
       tx_avail += (wqe->len + sizeof(struct rdma_hdr));
       wqe->status = RDMA_TX_PENDING;
@@ -117,15 +122,9 @@ int fast_rdmawq_bump(struct dataplane_context *ctx, uint32_t flow_id,
   {
     uint32_t old_avail, new_avail;
     // copy packets into txbuf
-//#ifndef DOING_NOW
     old_avail = tcp_txavail(fs, NULL);
     fast_rdma_poll(ctx, fs);
     new_avail = tcp_txavail(fs, NULL);
-//#else
-//    old_avail = wqe_txavail(fs);
-//    fast_rdma_poll(ctx, fs);
-//    new_avail = wqe_txavail(fs);
-//#endif
 
     if (old_avail < new_avail) {
       if (qman_set(&ctx->qman, flow_id, fs->tx_rate, new_avail -

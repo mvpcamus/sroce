@@ -26,7 +26,7 @@ int main()
   getchar();
 
   char *ptr = (char*) mr_base;
-  for (int i = 0; i < 512; i++)
+  for (int i = 0; i < mr_len; i++)
   {
     fprintf(stderr, "%c", ptr[i]);
   }

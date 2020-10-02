@@ -21,6 +21,10 @@ int count[NUM_CONNECTIONS];
 struct rdma_wqe ev[WQSIZE];
 uint64_t latency[8 * WQSIZE * 30];
 
+#define EXEC_LEN 120
+#define ITERATION 5000000
+uint32_t run_count;
+
 static inline uint64_t get_nanos(void)
 {
     struct timespec ts;
@@ -44,10 +48,13 @@ int main(int argc, char* argv[])
     uint32_t msg_len = (uint32_t) atoi(argv[4]);
     int pending_msgs = atoi(argv[5]);
     uint64_t compl_msgs = 0;
+    uint64_t iterations = ITERATION / num_conns;
 
     assert(num_conns < NUM_CONNECTIONS);
     assert(msg_len < MRSIZE);
     assert(pending_msgs < WQSIZE);
+
+    fprintf(stderr, "conns: %d, msg: %u, pend_msg: %d\n", num_conns, msg_len, pending_msgs);
 
     rdma_init();
     struct sockaddr_in remoteaddr;
@@ -66,8 +73,7 @@ int main(int argc, char* argv[])
         }
     }
 
-    fprintf(stderr, "Connections established: %d\n", num_conns);
-    getchar();
+    fprintf(stderr, "SRoCE Connections established: %d\n", num_conns);
 
     char* c = mr_base[0];
     char f = 0;
@@ -84,11 +90,13 @@ int main(int argc, char* argv[])
         count[i] = pending_msgs;
     }
 
+    fprintf(stderr, "msgs\tkbps\tus\n");
+
     uint64_t start_time = get_nanos();
     uint64_t iter = 0;
     uint64_t latency_count = 0;
     uint64_t total_latency = 0;
-    while (1)
+    while (run_count < EXEC_LEN)
     {
         iter ++;
         for (int i = 0; i < num_conns; i++)
@@ -136,18 +144,21 @@ int main(int argc, char* argv[])
             count[i] -= j;
         }
 
-        if (iter % 50000000 == 0)
+        if (iter % iterations == 0)
         {
             uint64_t cur_time = get_nanos();
             double diff = (cur_time - start_time)/1000000000.;
             double tpt = (compl_msgs*msg_len*8)/(diff * 1024);
             double latency = (total_latency/3000.)/latency_count;
-            fprintf(stderr, "Msgs: %lu Bytes: %lu Time: %lf Throughput=%lf Kbps Latency=%lf us\n",
-                    compl_msgs, compl_msgs*msg_len, diff, tpt, latency);
+/*          fprintf(stderr, "Msgs: %lu Bytes: %lu Time: %lf Throughput=%lf Kbps Latency=%lf us\n",
+                    compl_msgs, compl_msgs*msg_len, diff, tpt, latency); */
+            fprintf(stderr, "%lu\t%lf\t%lf\n", compl_msgs, tpt, latency);
 
-            // compl_msgs = 0;
-            // start_time = cur_time;
+            compl_msgs = 0;
+            start_time = cur_time;
+            run_count++;
         }
     }
+    printf("\nconnection %d ended\n", rport);
     return 0;
 }

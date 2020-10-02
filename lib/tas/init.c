@@ -224,9 +224,10 @@ int rdma_fastpath_poll(struct flextcp_context *ctx,
             break;
         } else if (arx->type == FLEXTCP_PL_ARX_RDMAUPDATE) {
             rx_conn = OPAQUE_PTR(arx->msg.rdmaupdate.opaque);
+            // normal case
             if (arx->msg.rdmaupdate.cq_head > rx_conn->cq_tail){
                 rx_conn->cq_len = arx->msg.rdmaupdate.cq_head - rx_conn->cq_tail;
-            }else{
+            }else{ // cq_head is overflowed
                 rx_conn->cq_len = arx->msg.rdmaupdate.cq_head + rx_conn->wq_size - rx_conn->cq_tail;
             }
             if (arx->msg.rdmaupdate.wq_tail > rx_conn->wq_tail){
@@ -234,7 +235,7 @@ int rdma_fastpath_poll(struct flextcp_context *ctx,
             }else if (arx->msg.rdmaupdate.wq_tail < rx_conn->wq_tail){
                 rx_conn->wq_len -= (arx->msg.rdmaupdate.wq_tail + rx_conn->wq_size - rx_conn->wq_tail);
             }else if (rx_conn->wq_len == rx_conn->wq_size){
-                rx_conn->wq_len = 0;
+                rx_conn->wq_len = 0; //TODO: is this required?
             }
             rx_conn->wq_tail = arx->msg.rdmaupdate.wq_tail;
             i = conn->cq_len;
